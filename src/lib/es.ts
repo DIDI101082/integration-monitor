@@ -1,4 +1,4 @@
-const ES_URL = process.env.ES_URL!;
+const ES_URL = process.env.ES_URL!; // ej: https://elasticsearch.accusys.com.ar (puerto 5601 Kibana)
 const ES_USERNAME = process.env.ES_USERNAME!;
 const ES_PASSWORD = process.env.ES_PASSWORD!;
 
@@ -7,20 +7,29 @@ function authHeader() {
   return { Authorization: `Basic ${token}` };
 }
 
+// Kibana expone la API de ES via /api/console/proxy?path=<index>/_search&method=POST
+// Requiere además el header kbn-xsrf
 export async function esSearch(
   index: string,
   body: Record<string, unknown>
 ): Promise<unknown> {
-  const url = `${ES_URL}/${index}/_search`;
+  const path = encodeURIComponent(`${index}/_search`);
+  const url = `${ES_URL}/api/console/proxy?path=${path}&method=POST`;
+
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeader() },
+    headers: {
+      "Content-Type": "application/json",
+      "kbn-xsrf": "true",
+      ...authHeader(),
+    },
     body: JSON.stringify(body),
     cache: "no-store",
   });
+
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`ES error ${res.status}: ${text}`);
+    throw new Error(`Kibana proxy error ${res.status}: ${text}`);
   }
   return res.json();
 }
