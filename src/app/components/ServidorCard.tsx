@@ -1,60 +1,46 @@
 "use client";
-
-import type { ServidorStats } from "@/types";
-import clsx from "clsx";
+import { ServidorStats } from "@/types";
 
 interface Props {
   servidor: ServidorStats;
-  onClick: () => void;
   selected: boolean;
+  onClick: () => void;
 }
 
-export default function ServidorCard({ servidor, onClick, selected }: Props) {
-  const { nombre, totalTrx, tiempoPromedio, activo } = servidor;
+function colorTiempo(ms: number) {
+  if (ms === 0) return "text-slate-500";
+  if (ms < 200) return "text-green-400";
+  if (ms < 500) return "text-yellow-400";
+  return "text-red-400";
+}
 
+export default function ServidorCard({ servidor, selected, onClick }: Props) {
   return (
     <button
       onClick={onClick}
-      className={clsx(
-        "w-full text-left rounded-xl p-4 border transition-all",
-        activo
-          ? selected
-            ? "bg-teal-500/20 border-teal-400 shadow-teal-500/20 shadow-lg"
-            : "bg-slate-800 border-slate-600 hover:border-teal-500/50"
-          : "bg-slate-900 border-slate-700 opacity-50"
-      )}
+      className={`w-full text-left p-3 rounded-lg border transition-all ${
+        selected ? "border-blue-500 bg-blue-950" : "border-slate-700 bg-slate-800 hover:border-slate-500"
+      }`}
     >
       <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-bold text-slate-100">{nombre}</span>
-        <span
-          className={clsx(
-            "w-2.5 h-2.5 rounded-full",
-            activo ? "bg-teal-400 shadow-sm shadow-teal-400" : "bg-red-500"
-          )}
-        />
+        <span className="font-mono text-sm font-semibold text-white">{servidor.nombre}</span>
+        <span className={`w-2 h-2 rounded-full ${servidor.activo ? "bg-green-400" : "bg-slate-600"}`} />
       </div>
-      <div className="text-xs text-slate-400 space-y-1">
-        <div className="flex justify-between">
-          <span>Trx (1h)</span>
-          <span className="text-slate-200 font-medium">
-            {totalTrx.toLocaleString("es-AR")}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span>T. Prom.</span>
-          <span
-            className={clsx(
-              "font-medium",
-              tiempoPromedio > 500
-                ? "text-red-400"
-                : tiempoPromedio > 200
-                ? "text-yellow-400"
-                : "text-slate-200"
-            )}
-          >
-            {tiempoPromedio} ms
-          </span>
-        </div>
+      <div className="grid grid-cols-2 gap-1 text-xs">
+        <span className="text-slate-400">Trx:</span>
+        <span className="text-slate-200 text-right font-mono">{servidor.totalTrx.toLocaleString("es-AR")}</span>
+        <span className="text-slate-400">Prom:</span>
+        <span className={`text-right font-mono ${colorTiempo(servidor.tiempoPromedio)}`}>
+          {servidor.tiempoPromedio > 0 ? `${servidor.tiempoPromedio}ms` : "-"}
+        </span>
+        <span className="text-slate-400">p95:</span>
+        <span className={`text-right font-mono ${colorTiempo(servidor.p95)}`}>
+          {servidor.p95 > 0 ? `${servidor.p95}ms` : "-"}
+        </span>
+        <span className="text-slate-400">p99:</span>
+        <span className={`text-right font-mono ${colorTiempo(servidor.p99)}`}>
+          {servidor.p99 > 0 ? `${servidor.p99}ms` : "-"}
+        </span>
       </div>
     </button>
   );

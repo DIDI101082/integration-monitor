@@ -7,7 +7,16 @@ const config: Config = {
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      fontFamily: {
+        mono: ["JetBrains Mono", "Fira Code", "Consolas", "monospace"],
+      },
+      colors: {
+        slate: {
+          950: "#020617",
+        },
+      },
+    },
   },
   plugins: [],
 };

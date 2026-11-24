@@ -1,64 +1,50 @@
-import { NextRequest, NextResponse } from "next/server";
-import { esSearch, indexPattern } from "@/lib/es";
-import type { ServicioStats } from "@/types";
+import { NextResponse } from "next/server";
+import { esSearch, todayIndex, wildcardIndex } from "@/lib/es";
+import { ServicioStats } from "@/types";
 
-export async function GET(req: NextRequest) {
+export const dynamic = "force-dynamic";
+
+export async function GET(request: Request) {
   try {
-    const { searchParams } = req.nextUrl;
+    const { searchParams } = new URL(request.url);
     const servidor = searchParams.get("servidor");
-    const idx = indexPattern(1);
+    const rango = searchParams.get("rango") ?? "1h";
 
-    const filter: unknown[] = [
-      { range: { "@timestamp": { gte: "now-1h", lte: "now" } } },
-    ];
-    if (servidor) {
-      filter.push({ term: { "server.keyword": servidor } });
-    }
+    const index = rango === "1h" ? todayIndex() : wildcardIndex();
+    const gte = rango === "1h" ? "now-1h" : rango === "24h" ? "now-24h" : rango === "7d" ? "now-7d" : "now-30d";
+
+    const must: unknown[] = [{ range: { "@timestamp": { gte, lte: "now" } } }];
+    if (servidor) must.push({ term: { "server.keyword": servidor } });
 
     const body = {
       size: 0,
-      query: { bool: { filter } },
+      query: { bool: { must } },
       aggs: {
         por_servicio: {
-          terms: {
-            field: "serviceid.keyword",
-            size: 100,
-            order: { cant: "desc" },
-          },
+          terms: { field: "serviceid.keyword", size: 100, order: { _count: "desc" } },
           aggs: {
-            cant: { value_count: { field: "tiempo_serv" } },
-            avg_tiempo: { avg: { field: "tiempo_serv" } },
-            max_tiempo: { max: { field: "tiempo_serv" } },
+            tiempo_promedio: { avg: { field: "tiempo_serv" } },
+            tiempo_max: { max: { field: "tiempo_serv" } },
+            p95: { percentiles: { field: "tiempo_serv", percents: [95, 99] } },
           },
         },
       },
     };
 
-    const data = (await esSearch(idx, body)) as {
-      aggregations: {
-        por_servicio: {
-          buckets: Array<{
-            key: string;
-            cant: { value: number };
-            avg_tiempo: { value: number | null };
-            max_tiempo: { value: number | null };
-          }>;
-        };
-      };
-    };
+    const data = await esSearch(index, body) as any;
+    const buckets = data?.aggregations?.por_servicio?.buckets ?? [];
 
-    const servicios: ServicioStats[] = (
-      data.aggregations?.por_servicio?.buckets ?? []
-    ).map((b) => ({
+    const resultado: ServicioStats[] = buckets.map((b: any) => ({
       serviceid: b.key,
-      cantTrx: b.cant.value,
-      tiempoPromedio: Math.round(b.avg_tiempo.value ?? 0),
-      peorTiempo: Math.round(b.max_tiempo.value ?? 0),
+      totalTrx: b.doc_count,
+      tiempoPromedio: Math.round(b.tiempo_promedio?.value ?? 0),
+      tiempoMax: Math.round(b.tiempo_max?.value ?? 0),
+      p95: Math.round(b.p95?.values?.["95.0"] ?? 0),
+      p99: Math.round(b.p95?.values?.["99.0"] ?? 0),
     }));
 
-    return NextResponse.json(servicios);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(resultado);
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

@@ -1,79 +1,52 @@
 "use client";
-
-import type { PoolInfo, ServidorStats } from "@/types";
-import clsx from "clsx";
+import { PoolStats } from "@/types";
 
 interface Props {
-  pool: PoolInfo;
-  servidores: ServidorStats[];
-  onSelectServidor: (s: string) => void;
+  pool: PoolStats;
   selectedServidor: string | null;
+  onSelectServidor: (nombre: string | null) => void;
 }
 
-export default function PoolCard({
-  pool,
-  servidores,
-  onSelectServidor,
-  selectedServidor,
-}: Props) {
-  const activos = servidores.filter((s) => s.activo).length;
-  const total = servidores.length;
+function colorTiempo(ms: number) {
+  if (ms === 0) return "text-slate-500";
+  if (ms < 200) return "text-green-400";
+  if (ms < 500) return "text-yellow-400";
+  return "text-red-400";
+}
+
+export default function PoolCard({ pool, selectedServidor, onSelectServidor }: Props) {
+  const activosCount = pool.servidores.filter((s) => s.activo).length;
 
   return (
-    <div className="bg-slate-800 rounded-xl border border-slate-700 p-4">
-      {/* Pool header */}
-      <div className="mb-3">
-        <div className="text-sm font-bold text-slate-100 mb-0.5">{pool.nombre}</div>
-        <div className="text-xs text-slate-500">
-          {pool.servidores.join(" · ")}
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold text-white text-sm">{pool.nombre}</h3>
+        <span className="text-xs text-slate-400">{activosCount}/{pool.servidores.length} activos</span>
+      </div>
+      <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+        <div>
+          <div className="text-slate-400 text-xs mb-1">Total Trx</div>
+          <div className="text-white font-mono font-semibold">{pool.totalTrx.toLocaleString("es-AR")}</div>
+        </div>
+        <div>
+          <div className="text-slate-400 text-xs mb-1">Tiempo Prom.</div>
+          <div className={`font-mono font-semibold ${colorTiempo(pool.tiempoPromedio)}`}>
+            {pool.tiempoPromedio > 0 ? `${pool.tiempoPromedio}ms` : "-"}
+          </div>
         </div>
       </div>
-
-      {/* Métricas */}
-      <div className="flex gap-3 mb-3 text-xs">
-        <div className="flex-1 bg-slate-900 rounded-lg p-2">
-          <p className="text-slate-500 mb-0.5">Trx (1h)</p>
-          <p className="text-teal-400 font-bold text-sm">
-            {pool.totalTrx.toLocaleString("es-AR")}
-          </p>
-        </div>
-        <div className="flex-1 bg-slate-900 rounded-lg p-2">
-          <p className="text-slate-500 mb-0.5">T. Prom.</p>
-          <p
-            className={clsx(
-              "font-bold text-sm",
-              pool.tiempoPromedio > 500
-                ? "text-red-400"
-                : pool.tiempoPromedio > 200
-                ? "text-yellow-400"
-                : "text-slate-200"
-            )}
-          >
-            {pool.tiempoPromedio} ms
-          </p>
-        </div>
-        <div className="flex-1 bg-slate-900 rounded-lg p-2">
-          <p className="text-slate-500 mb-0.5">Nodos</p>
-          <p className={clsx("font-bold text-sm", activos < total ? "text-yellow-400" : "text-slate-200")}>
-            {activos}/{total}
-          </p>
-        </div>
-      </div>
-
-      {/* Servidores del pool */}
-      <div className="flex flex-wrap gap-1.5">
-        {servidores.map((s) => (
+      <div className="flex flex-wrap gap-2">
+        {pool.servidores.map((s) => (
           <button
             key={s.nombre}
-            onClick={() => onSelectServidor(s.nombre)}
-            className={clsx(
-              "px-2 py-1 rounded text-xs font-medium transition-colors",
+            onClick={() => onSelectServidor(selectedServidor === s.nombre ? null : s.nombre)}
+            className={`text-xs font-mono px-2 py-1 rounded transition-colors ${
               selectedServidor === s.nombre
-                ? "bg-teal-500 text-white"
+                ? "bg-blue-600 text-white"
                 : s.activo
                 ? "bg-slate-700 text-slate-200 hover:bg-slate-600"
-                : "bg-red-900/40 text-red-400"
-            )}
+                : "bg-slate-900 text-slate-600"
+            }`}
           >
             {s.nombre}
           </button>

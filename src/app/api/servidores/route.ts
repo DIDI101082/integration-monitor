@@ -1,64 +1,48 @@
 import { NextResponse } from "next/server";
-import { esSearch, indexPattern } from "@/lib/es";
-import type { ServidorStats } from "@/types";
+import { esSearch, todayIndex } from "@/lib/es";
+import { POOLS, ServidorStats } from "@/types";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const idx = indexPattern(1);
-
-    // Agregación: por servidor → última actividad, cant trx, tiempo promedio
     const body = {
       size: 0,
-      query: {
-        range: {
-          "@timestamp": { gte: "now-1h", lte: "now" },
-        },
-      },
+      query: { range: { "@timestamp": { gte: "now-1h", lte: "now" } } },
       aggs: {
         por_servidor: {
           terms: { field: "server.keyword", size: 20 },
           aggs: {
-            total_trx: { value_count: { field: "tiempo_serv" } },
-            tiempo_promedio: { avg: { field: "tiempo_serv" } },
+            tiempo_promedio: { avg: { field: "tiempo_sp" } },
+            tiempo_max: { max: { field: "tiempo_sp" } },
             ultima_actividad: { max: { field: "@timestamp" } },
+            p95: { percentiles: { field: "tiempo_sp", percents: [95, 99] } },
           },
         },
       },
     };
 
-    const data = (await esSearch(idx, body)) as {
-      aggregations: {
-        por_servidor: {
-          buckets: Array<{
-            key: string;
-            total_trx: { value: number };
-            tiempo_promedio: { value: number | null };
-            ultima_actividad: { value_as_string: string | null };
-          }>;
-        };
-      };
-    };
+    const data = await esSearch(todayIndex(), body) as any;
+    const buckets = data?.aggregations?.por_servidor?.buckets ?? [];
+    const todosLosServidores = Object.values(POOLS).flat();
 
-    const buckets = data.aggregations?.por_servidor?.buckets ?? [];
-    const activos = new Set(buckets.map((b) => b.key));
-
-    // Todos los CTSPROD conocidos
-    const todos = Array.from({ length: 12 }, (_, i) => `CTSPROD${i + 1}`);
-
-    const servidores: ServidorStats[] = todos.map((nombre) => {
-      const bucket = buckets.find((b) => b.key === nombre);
+    const resultado: ServidorStats[] = todosLosServidores.map((nombre) => {
+      const bucket = buckets.find((b: any) => b.key === nombre);
+      if (!bucket) return { nombre, totalTrx: 0, tiempoPromedio: 0, tiempoMax: 0, p95: 0, p99: 0, ultimaActividad: null, activo: false };
       return {
         nombre,
-        totalTrx: bucket?.total_trx.value ?? 0,
-        tiempoPromedio: Math.round(bucket?.tiempo_promedio.value ?? 0),
-        ultimaActividad: bucket?.ultima_actividad.value_as_string ?? null,
-        activo: activos.has(nombre),
+        totalTrx: bucket.doc_count,
+        tiempoPromedio: Math.round(bucket.tiempo_promedio?.value ?? 0),
+        tiempoMax: Math.round(bucket.tiempo_max?.value ?? 0),
+        p95: Math.round(bucket.p95?.values?.["95.0"] ?? 0),
+        p99: Math.round(bucket.p95?.values?.["99.0"] ?? 0),
+        ultimaActividad: bucket.ultima_actividad?.value_as_string ?? null,
+        activo: true,
       };
     });
 
-    return NextResponse.json(servidores);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(resultado);
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

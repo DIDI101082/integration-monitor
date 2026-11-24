@@ -1,69 +1,57 @@
 import { NextResponse } from "next/server";
-import { esSearch, indexPattern } from "@/lib/es";
-import { POOLS } from "@/types";
-import type { PoolInfo } from "@/types";
+import { esSearch, todayIndex } from "@/lib/es";
+import { POOLS, PoolStats } from "@/types";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const idx = indexPattern(1);
-
     const body = {
       size: 0,
-      query: {
-        range: { "@timestamp": { gte: "now-1h", lte: "now" } },
-      },
+      query: { range: { "@timestamp": { gte: "now-1h", lte: "now" } } },
       aggs: {
         por_servidor: {
           terms: { field: "server.keyword", size: 20 },
           aggs: {
-            total_trx: { value_count: { field: "tiempo_serv" } },
-            tiempo_promedio: { avg: { field: "tiempo_serv" } },
+            tiempo_promedio: { avg: { field: "tiempo_sp" } },
+            tiempo_max: { max: { field: "tiempo_sp" } },
+            ultima_actividad: { max: { field: "@timestamp" } },
+            p95: { percentiles: { field: "tiempo_sp", percents: [95, 99] } },
           },
         },
       },
     };
 
-    const data = (await esSearch(idx, body)) as {
-      aggregations: {
-        por_servidor: {
-          buckets: Array<{
-            key: string;
-            total_trx: { value: number };
-            tiempo_promedio: { value: number | null };
-          }>;
+    const data = await esSearch(todayIndex(), body) as any;
+    const buckets = data?.aggregations?.por_servidor?.buckets ?? [];
+
+    const resultado: PoolStats[] = Object.entries(POOLS).map(([poolNombre, servidores]) => {
+      const servidoresStats = servidores.map((nombre) => {
+        const b = buckets.find((x: any) => x.key === nombre);
+        if (!b) return { nombre, totalTrx: 0, tiempoPromedio: 0, tiempoMax: 0, p95: 0, p99: 0, ultimaActividad: null, activo: false };
+        return {
+          nombre,
+          totalTrx: b.doc_count,
+          tiempoPromedio: Math.round(b.tiempo_promedio?.value ?? 0),
+          tiempoMax: Math.round(b.tiempo_max?.value ?? 0),
+          p95: Math.round(b.p95?.values?.["95.0"] ?? 0),
+          p99: Math.round(b.p95?.values?.["99.0"] ?? 0),
+          ultimaActividad: b.ultima_actividad?.value_as_string ?? null,
+          activo: true,
         };
-      };
-    };
+      });
 
-    const buckets = data.aggregations?.por_servidor?.buckets ?? [];
-    const statsPorServidor = new Map(
-      buckets.map((b) => [
-        b.key,
-        { trx: b.total_trx.value, avg: b.tiempo_promedio.value ?? 0 },
-      ])
-    );
+      const totalTrx = servidoresStats.reduce((s, x) => s + x.totalTrx, 0);
+      const activos = servidoresStats.filter((s) => s.activo && s.tiempoPromedio > 0);
+      const tiempoPromedio = activos.length
+        ? Math.round(activos.reduce((s, x) => s + x.tiempoPromedio, 0) / activos.length)
+        : 0;
 
-    const pools: PoolInfo[] = Object.entries(POOLS).map(
-      ([nombre, servidores]) => {
-        const totalTrx = servidores.reduce(
-          (acc, s) => acc + (statsPorServidor.get(s)?.trx ?? 0),
-          0
-        );
-        const tiempos = servidores
-          .map((s) => statsPorServidor.get(s)?.avg ?? 0)
-          .filter((t) => t > 0);
-        const tiempoPromedio =
-          tiempos.length > 0
-            ? Math.round(tiempos.reduce((a, b) => a + b, 0) / tiempos.length)
-            : 0;
+      return { nombre: poolNombre, servidores: servidoresStats, totalTrx, tiempoPromedio };
+    });
 
-        return { nombre, servidores, totalTrx, tiempoPromedio };
-      }
-    );
-
-    return NextResponse.json(pools);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(resultado);
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

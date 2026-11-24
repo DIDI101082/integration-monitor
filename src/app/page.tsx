@@ -1,249 +1,248 @@
 "use client";
-
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ServidorStats, PoolInfo, ServicioStats, SPStats } from "@/types";
-import { POOLS } from "@/types";
+import { useEffect, useState, useCallback } from "react";
 import Header from "./components/Header";
-import ServidorCard from "./components/ServidorCard";
 import PoolCard from "./components/PoolCard";
-import TablaServicios from "./components/TablaServicios";
+import ServidorCard from "./components/ServidorCard";
 import TablaSPs from "./components/TablaSPs";
-import { Monitor, Layers, Activity, Database } from "lucide-react";
-import clsx from "clsx";
+import TablaServicios from "./components/TablaServicios";
+import TablaBases from "./components/TablaBases";
+import GraficoTPS from "./components/GraficoTPS";
+import GraficoHistorial from "./components/GraficoHistorial";
+import { PoolStats, ServidorStats, SPStats, ServicioStats, BaseStats, TpsPoint, DiaStats, Alerta } from "@/types";
 
-type Tab = "servidores" | "pools" | "servicios" | "sps";
+type Tab = "pools" | "servidores" | "servicios" | "sps" | "bases" | "historial" | "tps";
+type Rango = "1h" | "24h" | "7d" | "30d";
 
-const REFRESH_MS = Number(process.env.NEXT_PUBLIC_REFRESH_INTERVAL ?? 60000);
-
-export default function Dashboard() {
+export default function Home() {
   const [tab, setTab] = useState<Tab>("pools");
-  const [servidores, setServidores] = useState<ServidorStats[]>([]);
-  const [pools, setPools] = useState<PoolInfo[]>([]);
-  const [servicios, setServicios] = useState<ServicioStats[]>([]);
-  const [sps, setSps] = useState<SPStats[]>([]);
-  const [selectedServidor, setSelectedServidor] = useState<string | null>(null);
+  const [rango, setRango] = useState<Rango>("1h");
   const [loading, setLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selectedServidor, setSelectedServidor] = useState<string | null>(null);
 
-  const fetchAll = useCallback(async () => {
+  const [pools, setPools] = useState<PoolStats[]>([]);
+  const [servidores, setServidores] = useState<ServidorStats[]>([]);
+  const [sps, setSps] = useState<SPStats[]>([]);
+  const [servicios, setServicios] = useState<ServicioStats[]>([]);
+  const [bases, setBases] = useState<BaseStats[]>([]);
+  const [tps, setTps] = useState<TpsPoint[]>([]);
+  const [historial, setHistorial] = useState<DiaStats[]>([]);
+  const [alertas, setAlertas] = useState<Alerta[]>([]);
+
+  const fetchData = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
-      const [srvRes, poolRes] = await Promise.all([
-        fetch("/api/servidores"),
-        fetch("/api/pools"),
-      ]);
-      const [srvData, poolData] = await Promise.all([
-        srvRes.json(),
-        poolRes.json(),
-      ]);
-      if (srvRes.ok) setServidores(srvData);
-      if (poolRes.ok) setPools(poolData);
+      const qs = new URLSearchParams();
+      if (selectedServidor) qs.set("servidor", selectedServidor);
+      qs.set("rango", rango);
+      const qsHistorial = new URLSearchParams();
+      if (selectedServidor) qsHistorial.set("servidor", selectedServidor);
+      qsHistorial.set("dias", "30");
+      const qsTps = new URLSearchParams();
+      if (selectedServidor) qsTps.set("servidor", selectedServidor);
+
+      const [poolsRes, servidoresRes, spsRes, serviciosRes, basesRes, tpsRes, historialRes, alertasRes] =
+        await Promise.all([
+          fetch("/api/pools"),
+          fetch("/api/servidores"),
+          fetch(`/api/transacciones?${qs}`),
+          fetch(`/api/servicios?${qs}`),
+          fetch(`/api/bases?${qs}`),
+          fetch(`/api/tps?${qsTps}`),
+          fetch(`/api/historial?${qsHistorial}`),
+          fetch("/api/alertas"),
+        ]);
+
+      const [poolsData, servidoresData, spsData, serviciosData, basesData, tpsData, historialData, alertasData] =
+        await Promise.all([
+          poolsRes.json(), servidoresRes.json(), spsRes.json(), serviciosRes.json(),
+          basesRes.json(), tpsRes.json(), historialRes.json(), alertasRes.json(),
+        ]);
+
+      if (Array.isArray(poolsData)) setPools(poolsData);
+      if (Array.isArray(servidoresData)) setServidores(servidoresData);
+      if (Array.isArray(spsData)) setSps(spsData);
+      if (Array.isArray(serviciosData)) setServicios(serviciosData);
+      if (Array.isArray(basesData)) setBases(basesData);
+      if (Array.isArray(tpsData)) setTps(tpsData);
+      if (Array.isArray(historialData)) setHistorial(historialData);
+      if (Array.isArray(alertasData)) setAlertas(alertasData);
       setLastUpdate(new Date());
-    } catch {
-      setError("Error al conectar con Elasticsearch");
+    } catch (e) {
+      console.error("Error fetching data:", e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedServidor, rango]);
 
-  const fetchServidorDetail = useCallback(async (servidor: string | null) => {
-    const qs = servidor ? `?servidor=${encodeURIComponent(servidor)}` : "";
-    const [svcRes, spRes] = await Promise.all([
-      fetch(`/api/servicios${qs}`),
-      fetch(`/api/transacciones${qs}`),
-    ]);
-    const [svcData, spData] = await Promise.all([svcRes.json(), spRes.json()]);
-    if (svcRes.ok) setServicios(svcData);
-    if (spRes.ok) setSps(spData);
-  }, []);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Carga inicial
   useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+    const interval = parseInt(process.env.NEXT_PUBLIC_REFRESH_INTERVAL ?? "60000");
+    const timer = setInterval(fetchData, interval);
+    return () => clearInterval(timer);
+  }, [fetchData]);
 
-  // Auto-refresh
-  useEffect(() => {
-    timerRef.current = setInterval(fetchAll, REFRESH_MS);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [fetchAll]);
+  const totalTrx = servidores.reduce((s, v) => s + v.totalTrx, 0);
+  const activosCount = servidores.filter((s) => s.activo).length;
+  const activosConDatos = servidores.filter((s) => s.activo && s.tiempoPromedio > 0);
+  const tiempoPromGlobal = activosConDatos.length
+    ? Math.round(activosConDatos.reduce((s, x) => s + x.tiempoPromedio, 0) / activosConDatos.length)
+    : 0;
+  const tpsActual = tps.length > 0 ? tps[tps.length - 1]?.trx ?? 0 : 0;
 
-  // Cuando cambia el servidor seleccionado o la tab de detalle
-  useEffect(() => {
-    if (tab === "servicios" || tab === "sps") {
-      fetchServidorDetail(selectedServidor);
-    }
-  }, [tab, selectedServidor, fetchServidorDetail]);
-
-  const handleSelectServidor = (nombre: string) => {
-    setSelectedServidor((prev) => (prev === nombre ? null : nombre));
-    setTab("servicios");
-    fetchServidorDetail(nombre);
+  const colorTiempo = (ms: number) => {
+    if (ms === 0) return "text-slate-500";
+    if (ms < 200) return "text-green-400";
+    if (ms < 500) return "text-yellow-400";
+    return "text-red-400";
   };
 
-  const servidorData = (nombre: string) =>
-    servidores.find((s) => s.nombre === nombre);
-
-  const tabs = [
-    { id: "pools" as Tab, label: "Pools", icon: Layers },
-    { id: "servidores" as Tab, label: "Servidores", icon: Monitor },
-    { id: "servicios" as Tab, label: "Servicios Orquestados", icon: Activity },
-    { id: "sps" as Tab, label: "Peores SPs", icon: Database },
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "pools", label: "Pools" },
+    { id: "servidores", label: "Servidores" },
+    { id: "servicios", label: "Servicios" },
+    { id: "sps", label: "Peores SPs" },
+    { id: "bases", label: "Bases de datos" },
+    { id: "tps", label: "TPS en vivo" },
+    { id: "historial", label: "Historial 30d" },
   ];
 
-  // Stats generales
-  const totalTrx = servidores.reduce((a, s) => a + s.totalTrx, 0);
-  const activosCount = servidores.filter((s) => s.activo).length;
-  const avgTiempo =
-    servidores.filter((s) => s.tiempoPromedio > 0).length > 0
-      ? Math.round(
-          servidores
-            .filter((s) => s.tiempoPromedio > 0)
-            .reduce((a, s) => a + s.tiempoPromedio, 0) /
-            servidores.filter((s) => s.tiempoPromedio > 0).length
-        )
-      : 0;
+  const rangoOptions: { id: Rango; label: string }[] = [
+    { id: "1h", label: "1h" },
+    { id: "24h", label: "24h" },
+    { id: "7d", label: "7d" },
+    { id: "30d", label: "30d" },
+  ];
+
+  const showRangoSelector = ["servicios", "sps", "bases"].includes(tab);
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950">
-      <Header onRefresh={fetchAll} loading={loading} lastUpdate={lastUpdate} />
+    <div className="min-h-screen bg-slate-950 text-white">
+      <Header lastUpdate={lastUpdate} onRefresh={fetchData} loading={loading} alertas={alertas} />
 
       {/* Métricas globales */}
-      <div className="px-6 py-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: "Servidores activos", value: `${activosCount}/12`, color: activosCount < 12 ? "text-yellow-400" : "text-teal-400" },
-          { label: "Trx última hora", value: totalTrx.toLocaleString("es-AR"), color: "text-blue-400" },
-          { label: "Tiempo promedio", value: `${avgTiempo} ms`, color: avgTiempo > 300 ? "text-red-400" : "text-slate-200" },
-          { label: "Pools activos", value: `${pools.length}`, color: "text-purple-400" },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="bg-slate-800/50 rounded-xl border border-slate-700 px-4 py-3">
-            <p className="text-xs text-slate-500 mb-1">{label}</p>
-            <p className={clsx("text-2xl font-bold", color)}>{value}</p>
+      <div className="px-6 py-4 grid grid-cols-4 gap-4 border-b border-slate-800">
+        <div className="bg-slate-900 rounded-lg p-4">
+          <div className="text-xs text-slate-400 mb-1">Servidores activos</div>
+          <div className="text-2xl font-bold text-white">
+            {activosCount}<span className="text-sm text-slate-500 ml-1">/ {servidores.length}</span>
           </div>
-        ))}
+        </div>
+        <div className="bg-slate-900 rounded-lg p-4">
+          <div className="text-xs text-slate-400 mb-1">Total trx (1h)</div>
+          <div className="text-2xl font-bold text-white">{totalTrx.toLocaleString("es-AR")}</div>
+        </div>
+        <div className="bg-slate-900 rounded-lg p-4">
+          <div className="text-xs text-slate-400 mb-1">Tiempo promedio</div>
+          <div className={`text-2xl font-bold font-mono ${colorTiempo(tiempoPromGlobal)}`}>
+            {tiempoPromGlobal > 0 ? `${tiempoPromGlobal}ms` : "-"}
+          </div>
+        </div>
+        <div className="bg-slate-900 rounded-lg p-4">
+          <div className="text-xs text-slate-400 mb-1">Trx/min ahora</div>
+          <div className="text-2xl font-bold text-blue-400 font-mono">{tpsActual}</div>
+        </div>
       </div>
 
-      {error && (
-        <div className="mx-6 mb-3 px-4 py-3 bg-red-900/30 border border-red-700 rounded-xl text-red-400 text-sm">
-          {error} — Verificá las credenciales en las variables de entorno.
+      {/* Filtro activo */}
+      {selectedServidor && (
+        <div className="px-6 py-2 bg-blue-950 border-b border-blue-800 flex items-center gap-3">
+          <span className="text-xs text-blue-300">
+            Filtrando: <span className="font-mono font-semibold">{selectedServidor}</span>
+          </span>
+          <button onClick={() => setSelectedServidor(null)} className="text-xs text-blue-400 hover:text-white">
+            ✕ Quitar filtro
+          </button>
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="px-6 mb-4">
-        <div className="flex gap-1 bg-slate-800/50 p-1 rounded-xl w-fit border border-slate-700">
-          {tabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              className={clsx(
-                "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                tab === id
-                  ? "bg-teal-500 text-white shadow"
-                  : "text-slate-400 hover:text-slate-200"
-              )}
-            >
-              <Icon className="w-4 h-4" />
-              {label}
-            </button>
-          ))}
+      <div className="px-6 pt-4">
+        {/* Tabs + selector de rango */}
+        <div className="flex items-center justify-between border-b border-slate-800 mb-6">
+          <div className="flex gap-1">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                  tab === t.id ? "border-blue-500 text-blue-400" : "border-transparent text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {showRangoSelector && (
+            <div className="flex gap-1 mb-1">
+              {rangoOptions.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => setRango(r.id)}
+                  className={`px-3 py-1 text-xs rounded transition-colors ${
+                    rango === r.id ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      </div>
 
-      {/* Contenido */}
-      <main className="flex-1 px-6 pb-6">
-
-        {/* TAB: POOLS */}
+        {/* Contenido */}
         {tab === "pools" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            {Object.entries(POOLS).map(([poolNombre, srvNombres]) => {
-              const poolInfo = pools.find((p) => p.nombre === poolNombre) ?? {
-                nombre: poolNombre,
-                servidores: srvNombres,
-                totalTrx: 0,
-                tiempoPromedio: 0,
-              };
-              const srvStats = srvNombres.map(
-                (n) => servidorData(n) ?? { nombre: n, totalTrx: 0, tiempoPromedio: 0, ultimaActividad: null, activo: false }
-              );
-              return (
-                <PoolCard
-                  key={poolNombre}
-                  pool={poolInfo}
-                  servidores={srvStats}
-                  onSelectServidor={handleSelectServidor}
-                  selectedServidor={selectedServidor}
-                />
-              );
-            })}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-8">
+            {pools.map((pool) => (
+              <PoolCard key={pool.nombre} pool={pool} selectedServidor={selectedServidor} onSelectServidor={setSelectedServidor} />
+            ))}
           </div>
         )}
 
-        {/* TAB: SERVIDORES */}
         {tab === "servidores" && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 pb-8">
             {servidores.map((s) => (
               <ServidorCard
                 key={s.nombre}
                 servidor={s}
                 selected={selectedServidor === s.nombre}
-                onClick={() => handleSelectServidor(s.nombre)}
+                onClick={() => setSelectedServidor(selectedServidor === s.nombre ? null : s.nombre)}
               />
             ))}
           </div>
         )}
 
-        {/* TAB: SERVICIOS ORQUESTADOS */}
         {tab === "servicios" && (
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700 p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-slate-200">
-                Servicios Orquestados
-                {selectedServidor && (
-                  <span className="ml-2 text-teal-400">— {selectedServidor}</span>
-                )}
-              </h2>
-              {selectedServidor && (
-                <button
-                  onClick={() => setSelectedServidor(null)}
-                  className="text-xs text-slate-500 hover:text-slate-300"
-                >
-                  Ver todos
-                </button>
-              )}
-            </div>
-            <TablaServicios servicios={servicios} loading={loading} />
+          <div className="bg-slate-900 rounded-xl p-5 pb-8">
+            <TablaServicios data={servicios} />
           </div>
         )}
 
-        {/* TAB: PEORES SPs */}
         {tab === "sps" && (
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700 p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-slate-200">
-                Peores Tiempos por SP
-                {selectedServidor && (
-                  <span className="ml-2 text-teal-400">— {selectedServidor}</span>
-                )}
-              </h2>
-              {selectedServidor && (
-                <button
-                  onClick={() => setSelectedServidor(null)}
-                  className="text-xs text-slate-500 hover:text-slate-300"
-                >
-                  Ver todos
-                </button>
-              )}
-            </div>
-            <TablaSPs sps={sps} loading={loading} />
+          <div className="bg-slate-900 rounded-xl p-5 pb-8">
+            <TablaSPs data={sps} />
           </div>
         )}
-      </main>
+
+        {tab === "bases" && (
+          <div className="bg-slate-900 rounded-xl p-5 pb-8">
+            <TablaBases data={bases} />
+          </div>
+        )}
+
+        {tab === "tps" && (
+          <div className="bg-slate-900 rounded-xl p-5 pb-8">
+            <div className="text-xs text-slate-400 mb-4">Transacciones por minuto — últimas 2 horas</div>
+            <GraficoTPS data={tps} />
+          </div>
+        )}
+
+        {tab === "historial" && (
+          <div className="bg-slate-900 rounded-xl p-5 pb-8">
+            <GraficoHistorial data={historial} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
