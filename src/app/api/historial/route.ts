@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { esSearch, wildcardIndex } from "@/lib/es";
+import { esSearch, wildcardIndex, buildDateRange } from "@/lib/es";
 import { DiaStats } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -8,11 +8,11 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const servidor = searchParams.get("servidor");
-    const dias = parseInt(searchParams.get("dias") ?? "30");
+    const desde = searchParams.get("desde");
+    const hasta = searchParams.get("hasta");
 
-    const must: unknown[] = [
-      { range: { "@timestamp": { gte: `now-${dias}d`, lte: "now" } } },
-    ];
+    const dateRange = buildDateRange(desde, hasta);
+    const must: unknown[] = [{ range: { "@timestamp": dateRange } }];
     if (servidor) must.push({ term: { "server.keyword": servidor } });
 
     const body = {

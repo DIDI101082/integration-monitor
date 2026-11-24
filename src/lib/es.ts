@@ -47,3 +47,23 @@ export function indexForDate(date: Date): string {
 export function wildcardIndex(): string {
   return "int_servicios_sp-*";
 }
+
+/**
+ * Construye un filtro de rango de fechas para Elasticsearch.
+ * Si se pasan desde/hasta (YYYY-MM-DD), usa esas fechas.
+ * Si no, usa las últimas 24 horas por defecto.
+ */
+export function buildDateRange(
+  desde: string | null | undefined,
+  hasta: string | null | undefined
+): Record<string, string> {
+  if (desde && hasta) {
+    // hasta: incluir todo el día (hasta las 23:59:59)
+    return {
+      gte: `${desde}T00:00:00`,
+      lte: `${hasta}T23:59:59`,
+    };
+  }
+  // Fallback: últimas 24 horas
+  return { gte: "now-24h", lte: "now" };
+}

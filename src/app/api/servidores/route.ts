@@ -1,14 +1,20 @@
 import { NextResponse } from "next/server";
-import { esSearch, todayIndex } from "@/lib/es";
+import { esSearch, wildcardIndex, buildDateRange } from "@/lib/es";
 import { POOLS, ServidorStats } from "@/types";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const desde = searchParams.get("desde");
+    const hasta = searchParams.get("hasta");
+
+    const dateRange = buildDateRange(desde, hasta);
+
     const body = {
       size: 0,
-      query: { range: { "@timestamp": { gte: "now-1h", lte: "now" } } },
+      query: { range: { "@timestamp": dateRange } },
       aggs: {
         por_servidor: {
           terms: { field: "server.keyword", size: 20 },
@@ -22,7 +28,7 @@ export async function GET() {
       },
     };
 
-    const data = await esSearch(todayIndex(), body) as any;
+    const data = await esSearch(wildcardIndex(), body) as any;
     const buckets = data?.aggregations?.por_servidor?.buckets ?? [];
     const todosLosServidores = Object.values(POOLS).flat();
 

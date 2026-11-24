@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { esSearch, todayIndex, wildcardIndex } from "@/lib/es";
+import { esSearch, wildcardIndex, buildDateRange } from "@/lib/es";
 import { BaseStats } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -7,14 +7,14 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const rango = searchParams.get("rango") ?? "1h";
+    const desde = searchParams.get("desde");
+    const hasta = searchParams.get("hasta");
 
-    const index = rango === "1h" ? todayIndex() : wildcardIndex();
-    const gte = rango === "1h" ? "now-1h" : rango === "24h" ? "now-24h" : rango === "7d" ? "now-7d" : "now-30d";
+    const dateRange = buildDateRange(desde, hasta);
 
     const body = {
       size: 0,
-      query: { range: { "@timestamp": { gte, lte: "now" } } },
+      query: { range: { "@timestamp": dateRange } },
       aggs: {
         por_base: {
           terms: { field: "base.keyword", size: 50, order: { _count: "desc" } },
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
       },
     };
 
-    const data = await esSearch(index, body) as any;
+    const data = await esSearch(wildcardIndex(), body) as any;
     const buckets = data?.aggregations?.por_base?.buckets ?? [];
 
     const resultado: BaseStats[] = buckets.map((b: any) => ({

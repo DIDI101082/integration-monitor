@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { esSearch, todayIndex, wildcardIndex } from "@/lib/es";
+import { esSearch, wildcardIndex, buildDateRange } from "@/lib/es";
 import { ServicioStats } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -8,12 +8,11 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const servidor = searchParams.get("servidor");
-    const rango = searchParams.get("rango") ?? "1h";
+    const desde = searchParams.get("desde");
+    const hasta = searchParams.get("hasta");
 
-    const index = rango === "1h" ? todayIndex() : wildcardIndex();
-    const gte = rango === "1h" ? "now-1h" : rango === "24h" ? "now-24h" : rango === "7d" ? "now-7d" : "now-30d";
-
-    const must: unknown[] = [{ range: { "@timestamp": { gte, lte: "now" } } }];
+    const dateRange = buildDateRange(desde, hasta);
+    const must: unknown[] = [{ range: { "@timestamp": dateRange } }];
     if (servidor) must.push({ term: { "server.keyword": servidor } });
 
     const body = {
@@ -31,7 +30,7 @@ export async function GET(request: Request) {
       },
     };
 
-    const data = await esSearch(index, body) as any;
+    const data = await esSearch(wildcardIndex(), body) as any;
     const buckets = data?.aggregations?.por_servicio?.buckets ?? [];
 
     const resultado: ServicioStats[] = buckets.map((b: any) => ({
