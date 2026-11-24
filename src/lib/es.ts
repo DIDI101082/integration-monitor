@@ -1,4 +1,4 @@
-const ES_URL = process.env.ES_URL!; // ej: https://elasticsearch.accusys.com.ar (puerto 5601 Kibana)
+const ES_URL = process.env.ES_URL!;
 const ES_USERNAME = process.env.ES_USERNAME!;
 const ES_PASSWORD = process.env.ES_PASSWORD!;
 
@@ -7,8 +7,6 @@ function authHeader() {
   return { Authorization: `Basic ${token}` };
 }
 
-// Kibana expone la API de ES via /api/console/proxy?path=<index>/_search&method=POST
-// Requiere además el header kbn-xsrf
 export async function esSearch(
   index: string,
   body: Record<string, unknown>
@@ -50,20 +48,24 @@ export function wildcardIndex(): string {
 
 /**
  * Construye un filtro de rango de fechas para Elasticsearch.
- * Si se pasan desde/hasta (YYYY-MM-DD), usa esas fechas.
- * Si no, usa las últimas 24 horas por defecto.
+ * Los datos en ES están en UTC. Argentina es UTC-3,
+ * así que un "día" local = desde las 03:00 UTC hasta las 02:59 UTC del día siguiente.
+ * Si desde === hasta (un solo día), cubre las 24hs locales completas.
  */
 export function buildDateRange(
   desde: string | null | undefined,
   hasta: string | null | undefined
 ): Record<string, string> {
   if (desde && hasta) {
-    // hasta: incluir todo el día (hasta las 23:59:59)
-    return {
-      gte: `${desde}T00:00:00`,
-      lte: `${hasta}T23:59:59`,
-    };
+    // desde: 00:00 hora argentina = 03:00 UTC
+    const gteUTC = `${desde}T03:00:00Z`;
+    // hasta: 23:59 hora argentina = siguiente día 02:59 UTC
+    const hastaDate = new Date(`${hasta}T00:00:00`);
+    hastaDate.setDate(hastaDate.getDate() + 1);
+    const hastaSiguiente = hastaDate.toISOString().slice(0, 10);
+    const lteUTC = `${hastaSiguiente}T02:59:59Z`;
+
+    return { gte: gteUTC, lte: lteUTC };
   }
-  // Fallback: últimas 24 horas
   return { gte: "now-24h", lte: "now" };
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { esSearch, todayIndex } from "@/lib/es";
+import { esSearch, wildcardIndex } from "@/lib/es";
 import { POOLS, Alerta } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export async function GET() {
       },
     };
 
-    const data = await esSearch(todayIndex(), body) as any;
+    const data = await esSearch(wildcardIndex(), body) as any;
     const servidorBuckets = data?.aggregations?.por_servidor?.buckets ?? [];
     const spBuckets = data?.aggregations?.por_sp?.buckets ?? [];
 

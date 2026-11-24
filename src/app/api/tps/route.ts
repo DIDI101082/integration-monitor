@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { esSearch, todayIndex } from "@/lib/es";
+import { esSearch, wildcardIndex } from "@/lib/es";
 import { TpsPoint } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
       },
     };
 
-    const data = await esSearch(todayIndex(), body) as any;
+    const data = await esSearch(wildcardIndex(), body) as any;
     const buckets = data?.aggregations?.por_minuto?.buckets ?? [];
 
     const resultado: TpsPoint[] = buckets.map((b: any) => ({
